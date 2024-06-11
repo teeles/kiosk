@@ -7,8 +7,11 @@ generate_random_string() {
 
 # Set some variables
 USR="sandbox1"
-PASS="password"
 NEW_HOSTNAME="sandbox-$(generate_random_string)"
+HOME="/home/$USR"
+PASS=$(date +%d%m%Y)-$(openssl rand -base64 15 | tr -dc 'a-zA-Z0-9' | head -c 8)
+RDP_SESSION_FILE="/etc/xrdp/startwm.sh"
+KEY="var/log/key.txt"
 
 # Check if the script was run with sudo
 if [ "$(id -u)" -ne 0 ]; then
@@ -16,10 +19,13 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+touch "$KEY"
+
 # Create the new user with a home directory and set the shell to /usr/sbin/nologin to disable command-line access
 echo "Creating user $USR..."
-useradd -m -s /usr/sbin/nologin "$USR"
+adduser --gecos GECOS --shell=/bin/false "$USR"
 echo "$USR:$PASS" | chpasswd
+echo "$PASS" > "$KEY"
 
 # Update sources -y automatically says yes to everything
 echo "Updating package sources..."
@@ -27,85 +33,64 @@ apt-get update -y
 
 # Use apt-get install
 echo "Installing necessary packages..."
-apt-get install -y --no-install-recommends openbox pulseaudio freerdp2-x11 gdm3 xrdp
+apt-get install -y --no-install-recommends xrdp
 
-# Add user to audio group
-echo "Adding $USR to audio group..."
-usermod -a -G audio "$USR"
+# Set up Firefox to start in single application mode
+echo "Setting up Firefox kiosk mode"
 
-# Configure Openbox autostart
-echo "Configuring Openbox autostart..."
-mkdir -p /etc/xdg/openbox
-mv /etc/xdg/openbox/autostart /etc/xdg/openbox/autostart.old 2>/dev/null
-cat > /etc/xdg/openbox/autostart <<EOF
-if test -x /usr/lib/x86_64-linux-gnu/gnome-settings-daemon >/dev/null; then
-  /usr/lib/x86_64-linux-gnu/gnome-settings-daemon &
-elif which gnome-settings-daemon >/dev/null 2>&1; then
-  gnome-settings-daemon &
+mkdir -p $HOME/.config/autostart
+
+cat <<EOF > $HOME/.config/autostart/firefox.desktop
+[Desktop Entry]
+Type=Application
+Name=Firefox Kiosk
+Exec=firefox --kiosk http://www.google.com
+EOF
+
+chown -R $USR:$USR $HOME/.config
+
+# Configure xrdp to start Firefox in kiosk mode
+echo "Configuring xrdp"
+sudo cp $RDP_SESSION_FILE ${RDP_SESSION_FILE}.bak
+
+cat <<EOF | tee $RDP_SESSION_FILE
+#!/bin/sh
+# Original content from startwm.sh
+if test -r /etc/profile; then
+    . /etc/profile
 fi
-/snap/bin/firefox "https://google.com" &
+if test -r /etc/bash.bashrc; then
+    . /etc/bash.bashrc
+fi
+if test -r ~/.bashrc; then
+    . ~/.bashrc
+fi
+
+# Custom kiosk user login setup
+if [ "\$USER" = "$USER" ]; then
+    startxfce4 &
+    /usr/bin/firefox --kiosk http://www.google.com
+else
+    # Original startwm.sh content
+    if [ -r /etc/X11/Xsession ]; then
+        exec /etc/X11/Xsession
+    fi
+    if [ -r /etc/x11/xinit/Xsession ]; then
+        exec /etc/x11/xinit/Xsession
+    fi
+    if [ -r /usr/bin/x-session-manager ]; then
+        exec /usr/bin/x-session-manager
+    fi
+    if [ -r /usr/bin/x-window-manager ]; then
+        exec /usr/bin/x-window-manager
+    fi
+    exec xterm
+fi
 EOF
-
-# Configure GDM3 for automatic login
-echo "Configuring GDM3 for automatic login..."
-mv /etc/gdm3/custom.conf /etc/gdm3/custom-old.conf 2>/dev/null
-cat > /etc/gdm3/custom.conf <<EOF
-[daemon]
-# WaylandEnable=false
-
-# Enabling automatic login
-AutomaticLoginEnable = true
-AutomaticLogin = $USR
-
-[security]
-
-[xdmcp]
-
-[chooser]
-EOF
-
-# Configure AccountsService
-echo "Configuring AccountsService for $USR..."
-mkdir -p /var/lib/AccountsService/users
-cat > /var/lib/AccountsService/users/$USR <<EOF
-[InputSource0]
-xkb=es
-
-[User]
-XSession=openbox
-SystemAccount=false
-EOF
-
-# Configure Openbox menu
-echo "Configuring Openbox menu..."
-mv /etc/xdg/openbox/menu.xml /etc/xdg/openbox/menu.xml.old 2>/dev/null
-cat > /etc/xdg/openbox/menu.xml <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-
-<openbox_menu xmlns="http://openbox.org/"
-        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:schemaLocation="http://openbox.org/
-                file:///usr/share/openbox/menu.xsd">
-
-<menu id="root-menu" label="Openbox 3">
-  <item label="Web browser">
-    <action name="Execute"><execute>x-www-browser</execute></action>
-  </item>
-  <separator />
-  <item label="Exit">
-    <action name="Exit" />
-  </item>
-</menu>
-
-</openbox_menu>
-EOF
-
-#enable the RDP server
-sudo systemctl enable xrdp
 
 # Schedule daily reboot at 02:00 AM
 echo "Scheduling daily reboot at 02:00 AM..."
-(crontab -l 2>/dev/null; echo "0 2 * * * /sbin/reboot") | crontab -
+(crontab -l 2>/dev/null; echo "0 2 * * * /sbin/reboot") | crontab -x
 
 # Change the hostname
 hostnamectl set-hostname "$NEW_HOSTNAME"
@@ -113,6 +98,6 @@ hostnamectl set-hostname "$NEW_HOSTNAME"
 # Update /etc/hosts to reflect the new hostname
 sed -i "s/127.0.1.1.*/127.0.1.1 $NEW_HOSTNAME/" /etc/hosts
 
-echo "Script completed successfully."
+sudo systemctl enable xrdp
 
-reboot now
+sudo systemctl restart xrdp
