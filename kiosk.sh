@@ -33,7 +33,7 @@ mkdir -p /etc/xdg/openbox
 mv /etc/xdg/openbox/autostart /etc/xdg/openbox/autostart.old 2>/dev/null
 cat > /etc/xdg/openbox/autostart <<EOF
 xfce-mcs-manager &
-/snap/bin/firefox "https://demo.udsenterprise.com" &
+/snap/bin/firefox "https://google.com" &
 EOF
 
 # Configure GDM3 for automatic login
