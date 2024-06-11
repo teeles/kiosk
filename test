@@ -11,7 +11,7 @@ NEW_HOSTNAME="sandbox-$(generate_random_string)"
 HOME="/home/$USR"
 PASS=$(date +%d%m%Y)-$(openssl rand -base64 15 | tr -dc 'a-zA-Z0-9' | head -c 8)
 RDP_SESSION_FILE="/etc/xrdp/startwm.sh"
-KEY="var/log/key.txt"
+KEY="/var/log/key.txt"
 
 # Check if the script was run with sudo
 if [ "$(id -u)" -ne 0 ]; then
@@ -21,7 +21,7 @@ fi
 
 touch "$KEY"
 
-# Create the new user with a home directory and set the shell to /usr/sbin/nologin to disable command-line access
+# Create the new user with a home directory and set the shell to /bin/false to disable command-line access
 echo "Creating user $USR..."
 adduser --gecos GECOS --shell=/bin/false "$USR"
 echo "$USR:$PASS" | chpasswd
@@ -33,7 +33,7 @@ apt-get update -y
 
 # Use apt-get install
 echo "Installing necessary packages..."
-apt-get install -y --no-install-recommends xrdp
+apt-get install -y --no-install-recommends xrdp xfce4 xfce4-goodies firefox
 
 # Set up Firefox to start in single application mode
 echo "Setting up Firefox kiosk mode"
@@ -53,21 +53,10 @@ chown -R $USR:$USR $HOME/.config
 echo "Configuring xrdp"
 sudo cp $RDP_SESSION_FILE ${RDP_SESSION_FILE}.bak
 
-cat <<EOF | tee $RDP_SESSION_FILE
+cat <<EOF | sudo tee $RDP_SESSION_FILE
 #!/bin/sh
-# Original content from startwm.sh
-if test -r /etc/profile; then
-    . /etc/profile
-fi
-if test -r /etc/bash.bashrc; then
-    . /etc/bash.bashrc
-fi
-if test -r ~/.bashrc; then
-    . ~/.bashrc
-fi
-
 # Custom kiosk user login setup
-if [ "\$USER" = "$USER" ]; then
+if [ "\$USER" = "$USR" ]; then
     startxfce4 &
     /usr/bin/firefox --kiosk http://www.google.com
 else
@@ -88,9 +77,24 @@ else
 fi
 EOF
 
+# Enable multiple sessions per user
+echo "Configuring XRDP for multiple sessions per user"
+
+# Update sesman.ini
+sed -i '/\[Sessions\]/a MaxSessions=50' /etc/xrdp/sesman.ini
+
+# Update xrdp.ini
+sed -i '/\[globals\]/a session_multiple=50' /etc/xrdp/xrdp.ini
+
+# Ensure session type is correctly set for xfce
+cat <<EOF | sudo tee -a /etc/xrdp/xrdp.ini
+[SessionTypes]
+xfce=startxfce4
+EOF
+
 # Schedule daily reboot at 02:00 AM
 echo "Scheduling daily reboot at 02:00 AM..."
-(crontab -l 2>/dev/null; echo "0 2 * * * /sbin/reboot") | crontab -x
+(crontab -l 2>/dev/null; echo "0 2 * * * /sbin/reboot") | crontab -
 
 # Change the hostname
 hostnamectl set-hostname "$NEW_HOSTNAME"
@@ -101,3 +105,5 @@ sed -i "s/127.0.1.1.*/127.0.1.1 $NEW_HOSTNAME/" /etc/hosts
 sudo systemctl enable xrdp
 
 sudo systemctl restart xrdp
+
+echo "Setup complete. User: $USR, Password: $(cat $KEY)"
