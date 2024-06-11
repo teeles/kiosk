@@ -2,7 +2,7 @@
 
 # Set some variables
 USR="sandbox1"
-PASS="S4ndB0x"
+PASS=$(openssl rand -base64 15 | tr -dc 'a-zA-Z0-9' | head -c 20)
 
 # Check if the script was run with sudo
 if [ "$(id -u)" -ne 0 ]; then
@@ -89,6 +89,10 @@ cat > /etc/xdg/openbox/menu.xml <<EOF
 
 </openbox_menu>
 EOF
+
+# Schedule daily reboot at 02:00 AM
+echo "Scheduling daily reboot at 02:00 AM..."
+(crontab -l 2>/dev/null; echo "0 2 * * * /sbin/reboot") | crontab -
 
 echo "Script completed successfully."
 
