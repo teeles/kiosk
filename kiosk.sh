@@ -1,8 +1,14 @@
 #!/bin/bash
 
+# Functions
+generate_random_string() {
+  tr -dc A-Za-z0-9 </dev/urandom | head -c 8
+}
+
 # Set some variables
 USR="sandbox1"
 PASS=$(openssl rand -base64 15 | tr -dc 'a-zA-Z0-9' | head -c 20)
+NEW_HOSTNAME="sandbox-$(generate_random_string)"
 
 # Check if the script was run with sudo
 if [ "$(id -u)" -ne 0 ]; then
@@ -93,6 +99,12 @@ EOF
 # Schedule daily reboot at 02:00 AM
 echo "Scheduling daily reboot at 02:00 AM..."
 (crontab -l 2>/dev/null; echo "0 2 * * * /sbin/reboot") | crontab -
+
+# Change the hostname
+hostnamectl set-hostname "$NEW_HOSTNAME"
+
+# Update /etc/hosts to reflect the new hostname
+sed -i "s/127.0.1.1.*/127.0.1.1 $NEW_HOSTNAME/" /etc/hosts
 
 echo "Script completed successfully."
 
